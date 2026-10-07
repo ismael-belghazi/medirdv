@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>MediRdv, démonstrateur</title>
+<link rel="stylesheet" href="/kit.css">
+<style>
+  form.row > * { flex: 1 1 140px; }
+  form.row button { flex: 0 0 auto; }
+  .agenda td:last-child { text-align: right; }
+  .agenda .jour { font: 12px/1.4 var(--mono); color: var(--muted); }
+  .danger { color: var(--err); border-color: #f5c2bf; }
+  .reperes li { font: 13px/1.7 var(--mono); }
+  .reperes { padding-left: 18px; margin: 10px 0 0; }
+</style>
+<script defer src="/carte.js"></script>
+<script defer src="/app.js"></script>
+</head>
+<body style="--accent:#0f9d8a">
+<header><div class="bar"><span class="mark"></span><span class="brand">MediRdv</span><span class="env" id="env">connexion…</span></div></header>
+<main>
+  <div>
+    <h1>Agenda du pilote</h1>
+    <p class="lead">Des rendez-vous fictifs, une base privée et ce que l’infrastructure voit de chaque requête. N’entrez jamais de vraie donnée de patient ici.</p>
+  </div>
+
+  <div class="alert" id="alert" hidden></div>
+
+  <section class="panel">
+    <h2>Carte du déploiement</h2>
+    <div class="carte" id="carte"><p class="muted">Analyse en cours…</p></div>
+  </section>
+
+  <div class="split">
+    <section class="panel">
+      <h2>Rendez-vous</h2>
+      <form class="row" id="form">
+        <input name="patient" aria-label="Patient fictif" required maxlength="100">
+        <select name="praticien" aria-label="Praticien"><option>Dr Exemple</option><option>Dr Démo</option></select>
+        <input name="debut" type="datetime-local" aria-label="Date et heure" required>
+        <button class="primary" type="submit">Ajouter</button>
+      </form>
+      <div class="scroll" style="margin-top:12px"><table class="agenda">
+        <thead><tr><th>Quand</th><th>Patient</th><th>Praticien</th><th></th></tr></thead>
+        <tbody id="agenda"><tr><td colspan="4" class="muted">Chargement…</td></tr></tbody>
+      </table></div>
+      <p class="muted small">Supprimer un rendez-vous permet de simuler l’erreur que la restauration devra rattraper.</p>
+    </section>
+
+    <section class="panel">
+      <h2>Ce que voit l’infrastructure</h2>
+      <div class="stats">
+        <div class="stat"><span>Base</span><strong id="db-status">…</strong></div>
+        <div class="stat"><span>Mode</span><strong id="db-mode" class="small">…</strong></div>
+        <div class="stat"><span>Latence</span><strong id="db-ms">…</strong></div>
+        <div class="stat"><span>Lignes</span><strong id="db-rows">…</strong></div>
+      </div>
+      <p style="margin:14px 0 4px" class="small">Connexions du pool : <span class="mono" id="pool-text">…</span></p>
+      <div class="gauge"><span id="pool-gauge"></span></div>
+      <p class="small" style="margin-top:12px">Dernière écriture : <span class="mono" id="db-last">…</span><br>Instance : <span class="mono" id="instance">…</span></p>
+      <h2 style="margin-top:20px">Repères pour mesurer le RPO</h2>
+      <p class="small muted">Posez un repère avant une sauvegarde, puis un autre après. Après la restauration, le dernier repère retrouvé indique la perte de données.</p>
+      <button id="repere">Poser un repère horodaté</button>
+      <ol class="reperes" id="reperes"></ol>
+    </section>
+  </div>
+</main>
+<footer>Démonstrateur du TP Insset GCP M1 2026. Il sert à vérifier l’infrastructure, il n’est pas évalué.</footer>
+</body>
+</html>

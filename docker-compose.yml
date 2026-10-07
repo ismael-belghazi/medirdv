@@ -1,0 +1,44 @@
+# MediRdv en local : docker compose up --build, puis http://localhost:8080
+name: medirdv-local
+
+services:
+  # Joue le rôle de Cloud SQL. Aucun port n'est publié : comme une instance sans IP publique,
+  # la base n'est joignable que depuis le réseau interne, pas depuis votre machine.
+  base:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: medirdv
+      POSTGRES_USER: medirdv_app
+      POSTGRES_PASSWORD_FILE: /run/medirdv/db-password
+    configs:
+      - source: db-password
+        target: /run/medirdv/db-password
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U medirdv_app -d medirdv"]
+      interval: 3s
+      retries: 20
+
+  # Le code à déployer sur Cloud Run.
+  api:
+    build: ./api
+    ports:
+      - "8080:8080"
+    environment:
+      APP_VERSION: local
+      DB_HOST: base
+      DB_NAME: medirdv
+      DB_USER: medirdv_app
+      # Sur Cloud Run, le secret Secret Manager peut être monté comme fichier de la même façon.
+      DB_PASSWORD_FILE: /run/medirdv/db-password
+      POOL_MAX: "5"
+    configs:
+      - source: db-password
+        target: /run/medirdv/db-password
+    depends_on:
+      base:
+        condition: service_healthy
+
+# Remplace Secret Manager en local. Ce mot de passe ne sert qu'ici.
+configs:
+  db-password:
+    content: medirdv-local-uniquement
