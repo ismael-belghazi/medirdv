@@ -14,9 +14,10 @@ terraform {
   }
 
   backend "gcs" {
-    bucket = "TON_PROJECT_ID-terraform-state"
+    bucket = "medirdv-4444-07-10-2026-terraform-state"
     prefix = "medirdv"
   }
+
 }
 
 provider "google" {
