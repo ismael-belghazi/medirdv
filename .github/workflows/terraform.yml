@@ -39,17 +39,21 @@ jobs:
 
       # Vérification du format Terraform
       - name: Terraform Format Check
+        working-directory: ./terraform
         run: terraform fmt -check -recursive
 
       # Initialisation Terraform
-      # appelle backend GCS 
+      # Utilise le backend GCS configuré dans terraform/
       - name: Terraform Init
+        working-directory: ./terraform
         run: terraform init -input=false
 
       # Validation Terraform
       - name: Terraform Validate
+        working-directory: ./terraform
         run: terraform validate
 
       # Vérification du plan
       - name: Terraform Plan
+        working-directory: ./terraform
         run: terraform plan -input=false -no-color
