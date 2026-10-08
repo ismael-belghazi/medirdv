@@ -1,7 +1,3 @@
-output "log_sink_name" {
-  description = "Nom du Log Sink MediRDV"
-  value       = google_logging_project_sink.medirdv.name
-}
 
 output "cloud_run_alert_policy" {
   description = "Nom de la politique d'alerte Cloud Run"

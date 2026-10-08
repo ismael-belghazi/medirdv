@@ -17,3 +17,7 @@ output "database_user" {
 output "password_secret" {
   value = google_secret_manager_secret.database_password.secret_id
 }
+
+output "instance_connection_name" {
+  value = google_sql_database_instance.postgres.connection_name
+}

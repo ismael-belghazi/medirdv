@@ -20,21 +20,21 @@ resource "google_secret_manager_secret_version" "database_password" {
 resource "google_sql_database_instance" "postgres" {
   project          = var.project_id
   name             = "medirdv-postgres"
-  database_version = "POSTGRES_18"
+  database_version = "POSTGRES_15"
   region           = var.region
 
   settings {
-    tier = "db-f1-micro"
+    tier = "db-custom-1-3840"
+
+    ip_configuration {
+      ipv4_enabled    = false
+      private_network = var.network_id
+    }
 
     backup_configuration {
       enabled                        = true
       point_in_time_recovery_enabled = true
       transaction_log_retention_days = 7
-    }
-
-    ip_configuration {
-      ipv4_enabled    = false
-      private_network = var.network_id
     }
   }
 
