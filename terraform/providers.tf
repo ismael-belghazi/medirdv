@@ -13,12 +13,10 @@ terraform {
     }
   }
 
-  # À décommenter après le bootstrap
-  #
-  # backend "gcs" {
-  #   bucket = "TON_PROJECT_ID-terraform-state"
-  #   prefix = "medirdv"
-  # }
+  backend "gcs" {
+    bucket = "TON_PROJECT_ID-terraform-state"
+    prefix = "medirdv"
+  }
 }
 
 provider "google" {
