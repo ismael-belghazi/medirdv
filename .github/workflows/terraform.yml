@@ -1,0 +1,55 @@
+name: Terraform CI
+
+on:
+  pull_request:
+    branches:
+      - main
+
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+env:
+  TF_VERSION: "1.6.0"
+
+jobs:
+  terraform:
+    name: Terraform Validate & Plan
+    runs-on: ubuntu-latest
+
+    steps:
+      # Récupération du repository
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # Installation de Terraform
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+
+      # Authentification Google Cloud
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_CREDENTIALS }}
+
+      # Vérification du format Terraform
+      - name: Terraform Format Check
+        run: terraform fmt -check -recursive
+
+      # Initialisation Terraform
+      # appelle backend GCS 
+      - name: Terraform Init
+        run: terraform init -input=false
+
+      # Validation Terraform
+      - name: Terraform Validate
+        run: terraform validate
+
+      # Vérification du plan
+      - name: Terraform Plan
+        run: terraform plan -input=false -no-color
