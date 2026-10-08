@@ -44,11 +44,13 @@ module "vm" {
 module "network" {
   source = "./modules/network"
 
-  project_id   = var.project_id
-  region       = var.region
-  network_name = var.network_name
-  subnet_name  = var.subnet_name
-  subnet_cidr  = var.subnet_cidr
+  project_id           = var.project_id
+  region               = var.region
+  network_name         = var.network_name
+  subnet_frontend_name = var.subnet_frontend_name
+  subnet_frontend_cidr = var.subnet_frontend_cidr
+  subnet_bastion_name  = var.subnet_bastion_name
+  subnet_bastion_cidr  = var.subnet_bastion_cidr
 
   depends_on = [
     google_project_service.services
@@ -78,8 +80,7 @@ module "application" {
   container_image = var.container_image
 
   network_id = module.network.network_id
-  subnet_id  = module.network.subnet_id
-
+  subnet_id  = module.network.subnet_frontend_id
   database_host   = module.database.private_ip
   database_name   = module.database.database_name
   database_user   = module.database.database_user

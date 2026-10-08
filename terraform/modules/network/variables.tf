@@ -10,10 +10,16 @@ variable "network_name" {
   type = string
 }
 
-variable "subnet_name" {
+variable "subnet_frontend_name" {
   type = string
 }
+variable "subnet_frontend_cidr" { 
+  type = string 
+  }
 
-variable "subnet_cidr" {
+variable "subnet_bastion_name" {
   type = string
 }
+variable "subnet_bastion_cidr" { 
+  type = string 
+  }

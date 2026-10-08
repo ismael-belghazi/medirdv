@@ -6,12 +6,21 @@ resource "google_compute_network" "vpc" {
   mtu                     = 1460
 }
 
-resource "google_compute_subnetwork" "subnet" {
+resource "google_compute_subnetwork" "subnet_bastion" {
   project                  = var.project_id
   region                   = var.region
-  name                     = var.subnet_name
+  name                     = var.subnet_bastion_name
   network                  = google_compute_network.vpc.id
-  ip_cidr_range            = var.subnet_cidr
+  ip_cidr_range            = var.subnet_bastion_cidr
+  private_ip_google_access = true
+}
+
+resource "google_compute_subnetwork" "subnet_frontend" {
+  project                  = var.project_id
+  region                   = var.region
+  name                     = var.subnet_frontend_name
+  network                  = google_compute_network.vpc.id
+  ip_cidr_range            = var.subnet_frontend_cidr
   private_ip_google_access = true
 }
 

@@ -21,17 +21,18 @@ variable "network_name" {
   default     = "medirdv-vpc"
 }
 
-variable "subnet_name" {
-  description = "Nom du subnet"
-  type        = string
-  default     = "medirdv-subnet"
-}
-
-variable "subnet_cidr" {
-  description = "CIDR du subnet"
-  type        = string
-  default     = "10.10.0.0/24"
-}
+variable "subnet_frontend_name" { 
+  type = string 
+  }
+variable "subnet_frontend_cidr" { 
+  type = string 
+  }
+variable "subnet_bastion_name" { 
+  type = string 
+  }
+variable "subnet_bastion_cidr" { 
+  type = string 
+  }
 
 variable "database_name" {
   description = "Nom de la base PostgreSQL"
