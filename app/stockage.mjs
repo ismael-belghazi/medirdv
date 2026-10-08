@@ -86,6 +86,7 @@ async function stockagePostgres(mode) {
     // Une fonction plutôt qu'une valeur : le mot de passe est relu à chaque nouvelle connexion.
     password: motDePasse,
     database: process.env.DB_NAME,
+    ssl: process.env.DB_SSL === "true" ? { rejectUnauthorized: false } : undefined,
     max,
     connectionTimeoutMillis: 5000,
   });
