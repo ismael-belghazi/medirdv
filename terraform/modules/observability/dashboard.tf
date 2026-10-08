@@ -16,8 +16,8 @@ resource "google_monitoring_dashboard" "medirdv" {
                   filter = "resource.type=\"cloud_run_revision\" AND metric.type=\"run.googleapis.com/request_count\""
 
                   aggregation = {
-                    alignmentPeriod  = "60s"
-                    perSeriesAligner  = "ALIGN_RATE"
+                    alignmentPeriod    = "60s"
+                    perSeriesAligner   = "ALIGN_RATE"
                     crossSeriesReducer = "REDUCE_SUM"
                   }
                 }
@@ -43,7 +43,7 @@ resource "google_monitoring_dashboard" "medirdv" {
                   filter = "resource.type=\"cloud_run_revision\" AND metric.type=\"run.googleapis.com/request_count\" AND metric.label.response_code_class=\"5xx\""
 
                   aggregation = {
-                    alignmentPeriod   = "60s"
+                    alignmentPeriod    = "60s"
                     perSeriesAligner   = "ALIGN_RATE"
                     crossSeriesReducer = "REDUCE_SUM"
                   }
@@ -70,7 +70,7 @@ resource "google_monitoring_dashboard" "medirdv" {
                   filter = "resource.type=\"cloud_run_revision\" AND metric.type=\"run.googleapis.com/request_latencies\""
 
                   aggregation = {
-                    alignmentPeriod   = "60s"
+                    alignmentPeriod    = "60s"
                     perSeriesAligner   = "ALIGN_PERCENTILE_95"
                     crossSeriesReducer = "REDUCE_PERCENTILE_95"
                   }
@@ -98,7 +98,7 @@ resource "google_monitoring_dashboard" "medirdv" {
                   filter = "resource.type=\"cloudsql_database\" AND metric.type=\"cloudsql.googleapis.com/database/cpu/utilization\""
 
                   aggregation = {
-                    alignmentPeriod   = "60s"
+                    alignmentPeriod    = "60s"
                     perSeriesAligner   = "ALIGN_MEAN"
                     crossSeriesReducer = "REDUCE_MEAN"
                   }
@@ -126,7 +126,7 @@ resource "google_monitoring_dashboard" "medirdv" {
                   filter = "resource.type=\"cloudsql_database\" AND metric.type=\"cloudsql.googleapis.com/database/network/connections\""
 
                   aggregation = {
-                    alignmentPeriod   = "60s"
+                    alignmentPeriod    = "60s"
                     perSeriesAligner   = "ALIGN_MEAN"
                     crossSeriesReducer = "REDUCE_MEAN"
                   }
@@ -154,7 +154,7 @@ resource "google_monitoring_dashboard" "medirdv" {
                   filter = "resource.type=\"cloudsql_database\" AND metric.type=\"cloudsql.googleapis.com/database/disk/bytes_used\""
 
                   aggregation = {
-                    alignmentPeriod   = "60s"
+                    alignmentPeriod    = "60s"
                     perSeriesAligner   = "ALIGN_MEAN"
                     crossSeriesReducer = "REDUCE_MEAN"
                   }

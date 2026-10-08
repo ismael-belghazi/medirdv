@@ -8,10 +8,12 @@ output "network_name" {
   description = "Le nom du VPC"
 }
 
-output "subnet_frontend_id" { 
-  value = google_compute_subnetwork.subnet_frontend.id 
-  }
+output "subnet_frontend_id" {
+  value       = google_compute_subnetwork.subnet_frontend.id
+  description = "L'ID du subnet frontend"
+}
 
-output "subnet_bastion_id" { 
-  value = google_compute_subnetwork.subnet_bastion.id 
-  }
+output "subnet_bastion_id" {
+  value       = google_compute_subnetwork.subnet_bastion.id
+  description = "L'ID du subnet bastion"
+}

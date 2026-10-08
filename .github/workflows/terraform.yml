@@ -43,7 +43,8 @@ jobs:
 
       - name: Terraform Format Check
         working-directory: ./terraform
-        run: terraform fmt -check -recursive
+        run: |
+          find . -type f -name "*.tf" -print0 | xargs -0 terraform fmt -check
 
       - name: Terraform Init
         working-directory: ./terraform
