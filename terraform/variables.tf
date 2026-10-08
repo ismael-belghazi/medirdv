@@ -55,3 +55,22 @@ variable "container_image" {
   description = "Image Docker de l'application"
   type        = string
 }
+
+variable "ssh_public_keys" {
+  description = "Liste des clés SSH publiques autorisées"
+  type        = list(string)
+  sensitive   = false
+}
+
+
+
+variable "vms" {
+  description = "VMs à créer"
+  type = map(object({
+    subnetwork = string
+    network_ip = string
+    tags       = list(string)
+    public_ip  = bool
+    startup    = string
+  }))
+}

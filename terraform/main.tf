@@ -19,6 +19,28 @@ resource "google_project_service" "services" {
   disable_on_destroy = false
 }
 
+module "vm" {
+  for_each = var.vms
+
+  source = "./modules/vm"
+
+  project_id = var.project_id
+
+  name         = each.key
+  machine_type = "e2-medium"
+  zone         = var.zone
+
+  subnetwork = "projects/${var.project_id}/regions/${var.region}/subnetworks/${each.value.subnetwork}"
+
+  network_ip    = each.value.network_ip
+  instance_tags = each.value.tags
+  public_ip     = each.value.public_ip
+
+  ssh_public_keys = var.ssh_public_keys
+  startup_script  = each.value.startup
+}
+
+
 module "network" {
   source = "./modules/network"
 
