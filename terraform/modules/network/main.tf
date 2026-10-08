@@ -99,7 +99,7 @@ resource "google_compute_firewall" "deny_frontend_to_database_all" {
   deny {
     protocol = "all"
   }
-  destination_ranges = ["10.160.80.3"]
+  destination_ranges = ["${module.database.private_ip}/32"]
   target_tags        = ["frontend"]
 }
 
@@ -115,6 +115,6 @@ resource "google_compute_firewall" "allow_api_frontend_to_database" {
     protocol = "tcp"
     ports    = ["5432"]
   }
-  destination_ranges = ["10.160.80.3"]
+  destination_ranges = ["${module.database.private_ip}/32"]
   target_tags        = ["frontend"]
 }
