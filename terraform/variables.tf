@@ -21,18 +21,23 @@ variable "network_name" {
   default     = "medirdv-vpc"
 }
 
-variable "subnet_frontend_name" { 
-  type = string 
-  }
-variable "subnet_frontend_cidr" { 
-  type = string 
-  }
-variable "subnet_bastion_name" { 
-  type = string 
-  }
-variable "subnet_bastion_cidr" { 
-  type = string 
-  }
+variable "subnet_frontend_name" {
+  type = string
+}
+variable "subnet_frontend_cidr" {
+  type = string
+}
+variable "subnet_bastion_name" {
+  type = string
+}
+variable "subnet_bastion_cidr" {
+  type = string
+}
+
+variable "database_private_ip" {
+  type        = string
+  description = "Private IP address of the database"
+}
 
 variable "database_name" {
   description = "Nom de la base PostgreSQL"

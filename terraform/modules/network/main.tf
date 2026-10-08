@@ -36,10 +36,10 @@ resource "google_compute_global_address" "private_service_range" {
 resource "google_service_networking_connection" "private_service_access" {
   network                 = google_compute_network.vpc.id
   service                 = "servicenetworking.googleapis.com"
-  reserved_peering_ranges = [google_compute_global_address.private_service_range.name]
+  reserved_peering_ranges = [
+    google_compute_global_address.private_service_range.name
+  ]
 }
-
-
 
 resource "google_compute_firewall" "allow_iap_ssh_bastion" {
   project   = var.project_id
@@ -52,10 +52,10 @@ resource "google_compute_firewall" "allow_iap_ssh_bastion" {
     protocol = "tcp"
     ports    = ["22"]
   }
+
   source_ranges = ["35.235.240.0/20"]
   target_tags   = ["bastion"]
 }
-
 
 resource "google_compute_firewall" "allow_internet_to_frontend" {
   project   = var.project_id
@@ -68,10 +68,10 @@ resource "google_compute_firewall" "allow_internet_to_frontend" {
     protocol = "tcp"
     ports    = ["80", "443"]
   }
+
   source_ranges = ["0.0.0.0/0"]
   target_tags   = ["frontend"]
 }
-
 
 resource "google_compute_firewall" "allow_ssh_bastion_to_frontend" {
   project   = var.project_id
@@ -84,37 +84,7 @@ resource "google_compute_firewall" "allow_ssh_bastion_to_frontend" {
     protocol = "tcp"
     ports    = ["22"]
   }
+
   source_tags = ["bastion"]
   target_tags = ["frontend"]
-}
-
-
-resource "google_compute_firewall" "deny_frontend_to_database_all" {
-  project   = var.project_id
-  name      = "deny-frontend-to-database-all"
-  network   = google_compute_network.vpc.id
-  priority  = 2000
-  direction = "EGRESS"
-
-  deny {
-    protocol = "all"
-  }
-  destination_ranges = ["${module.database.private_ip}/32"]
-  target_tags        = ["frontend"]
-}
-
-
-resource "google_compute_firewall" "allow_api_frontend_to_database" {
-  project   = var.project_id
-  name      = "allow-api-frontend-to-database"
-  network   = google_compute_network.vpc.id
-  priority  = 1000
-  direction = "EGRESS"
-
-  allow {
-    protocol = "tcp"
-    ports    = ["5432"]
-  }
-  destination_ranges = ["${module.database.private_ip}/32"]
-  target_tags        = ["frontend"]
 }

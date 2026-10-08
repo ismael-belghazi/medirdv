@@ -9,7 +9,7 @@ variable "region" {
 }
 
 variable "network_id" {
-  description = "ID du VPC privé"
+  description = "VPC network ID used by Cloud SQL"
   type        = string
 }
 

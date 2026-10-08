@@ -8,8 +8,7 @@ resource "google_service_account" "cloud_run" {
 resource "google_project_iam_member" "secret_accessor" {
   project = var.project_id
 
-  role = "roles/secretmanager.secretAccessor"
-
+  role   = "roles/secretmanager.secretAccessor"
   member = "serviceAccount:${google_service_account.cloud_run.email}"
 }
 
@@ -65,6 +64,10 @@ resource "google_cloud_run_v2_service" "application" {
     percent = 100
     type    = "TRAFFIC_TARGET_ALLOCATION_TYPE_LATEST"
   }
+
+  depends_on = [
+    google_project_iam_member.secret_accessor
+  ]
 }
 
 resource "google_cloud_run_v2_service_iam_member" "invoker" {

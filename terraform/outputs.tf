@@ -15,12 +15,12 @@ output "vpc_id" {
 
 output "subnet_frontend_id" {
   description = "ID du subnet frontend"
-  value = module.network.subnet_frontend_id
+  value       = module.network.subnet_frontend_id
 }
 
 output "subnet_bastion_id" {
   description = "ID du subnet bastion"
-  value = module.network.subnet_bastion_id
+  value       = module.network.subnet_bastion_id
 }
 output "cloud_sql_private_ip" {
   description = "IP privée de Cloud SQL"
