@@ -1,0 +1,62 @@
+
+project_id      = "mon-project-gcp"
+region          = "europe-north1"
+zone            = "europe-north1-a"
+network_name    = "medirdv-vpc"
+subnet_name     = "medirdv-subnet"
+subnet_cidr     = "10.10.0.0/24"
+database_name   = "medirdv"
+database_user   = "medirdv-app"
+cloud_run_name  = "medirdv"
+container_image = "europe-north1-docker.pkg.dev/mon-project-gcp/medirdv/api:latest"
+
+ssh_public_keys = [
+  "ssh-ed25519 AAAA... utilisateur1",
+  "ssh-ed25519 AAAA... utilisateur2",
+  "ssh-rsa AAAA... utilisateur3"
+]
+
+vms = {
+  frontend = {
+    subnetwork = "subnet-frontend"
+    network_ip = ""
+
+    tags = [
+      "frontend",
+      "internal-ssh"
+    ]
+
+    public_ip = true
+
+    startup = <<-EOF
+      #!/bin/bash
+
+      apt-get update
+      apt-get install -y docker.io
+
+      systemctl enable docker
+      systemctl start docker
+
+      docker pull nginx
+
+      docker run -d \
+        --name nginx \
+        --restart unless-stopped \
+        -p 80:80 \
+        nginx
+    EOF
+  }
+
+  bastion = {
+    subnetwork = "subnet-bastion"
+    network_ip = ""
+
+    tags = [
+      "bastion"
+    ]
+
+    public_ip = true
+
+    startup = ""
+  }
+}

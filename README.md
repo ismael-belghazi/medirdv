@@ -1,113 +1,675 @@
-# MediRdv, kit de démarrage
 
-Une API de rendez-vous fictifs avec son agenda, prête à tourner sur Cloud Run et à rejoindre Cloud SQL en IP privée. L’interface montre aussi ce que voit l’infrastructure : le mode de connexion, la latence de la base, le remplissage du pool et la couche à vérifier quand quelque chose casse. Le kit est un démonstrateur : il sert à vérifier votre infrastructure, il n’est pas évalué.
+# MediRDV — Infrastructure Google Cloud
 
-N’utilisez que des données fictives, ici comme dans le laboratoire.
+## Présentation du projet
 
-## Ce qu’il contient
+Le projet **MediRDV** consiste à mettre en place une infrastructure sécurisée sur **Google Cloud Platform (GCP)** pour héberger une application de gestion de rendez-vous médicaux.
 
-```text
-api/                  Le code à déployer sur Cloud Run
-  server.mjs          Routes de l’API et de l’interface
-  stockage.mjs        Accès à PostgreSQL : connecteur Cloud SQL, connexion directe ou mémoire
-  public/             Interface : agenda, état de la connexion, repères horodatés
-  package.json, package-lock.json, Dockerfile
-docker-compose.yml    PostgreSQL et l’API, pour travailler en local
+L'architecture repose sur plusieurs services Google Cloud :
+
+- un **VPC privé** pour isoler les ressources ;
+- une **VM Frontend** exécutant Nginx ;
+- une **VM Bastion** dédiée aux connexions d'administration SSH ;
+- une instance **Cloud SQL PostgreSQL** accessible uniquement en IP privée ;
+- **Secret Manager** pour stocker les informations sensibles ;
+- **Cloud Logging** pour centraliser les logs ;
+- **Cloud Monitoring** pour superviser l'infrastructure ;
+- des **sauvegardes Cloud SQL** et le **Point-in-Time Recovery (PITR)**.
+
+## Architecture globale
+```mermaid
+flowchart TB
+
+    CLIENT["Client / Médecin"]
+    ADMIN["Administrateur"]
+
+    subgraph GCP["Google Cloud"]
+        subgraph VPC["VPC privé"]
+
+            subgraph FRONT_SUBNET["Subnet Frontend"]
+                FRONT["VM Frontend<br/>Nginx<br/>Application / Dashboard"]
+            end
+
+            subgraph BASTION_SUBNET["Subnet Bastion"]
+                BASTION["VM Bastion<br/>SSH"]
+            end
+
+        end
+
+        SQL["Cloud SQL<br/>PostgreSQL<br/>IP privée"]
+        SECRET["Secret Manager"]
+        BACKUP["Cloud SQL<br/>Backups + PITR"]
+        LOG["Cloud Logging"]
+        MON["Cloud Monitoring"]
+    end
+
+    CLIENT -->|"HTTPS : 443"| FRONT
+    ADMIN -->|"SSH via IAP : 22"| BASTION
+    BASTION -->|"SSH : 22"| FRONT
+    FRONT -->|"Connexion privée<br/>TCP : 5432"| SQL
+    BASTION -->|"Administration"| SQL
+
+    SECRET -.->|"Secrets"| FRONT
+    SQL -->|"Sauvegardes"| BACKUP
+
+    FRONT -.->|"Logs"| LOG
+    BASTION -.->|"Logs"| LOG
+    SQL -.->|"Logs"| LOG
+    LOG -->|"Métriques / alertes"| MON
+
+    style CLIENT fill:#623CE4,color:#fff
+    style ADMIN fill:#623CE4,color:#fff
+
+    style GCP fill:#f8f9fa,stroke:#5f6368,color:#202124
+    style VPC fill:#34A853,color:#fff
+
+    style FRONT_SUBNET fill:#4285F4,color:#fff
+    style BASTION_SUBNET fill:#FBBC04,color:#000
+
+    style FRONT fill:#1a73e8,color:#fff
+    style BASTION fill:#f9ab00,color:#000
+
+    style SQL fill:#4285F4,color:#fff
+    style SECRET fill:#34A853,color:#fff
+    style BACKUP fill:#EA4335,color:#fff
+    style LOG fill:#FBBC04,color:#000
+    style MON fill:#34A853,color:#fff
+```
+## Objectifs
+
+Les principaux objectifs de l'infrastructure sont :
+
+- isoler les ressources dans un réseau privé ;
+- limiter l'exposition des services sur Internet ;
+- sécuriser l'accès à la base de données ;
+- séparer les accès utilisateurs des accès d'administration ;
+- centraliser les logs ;
+- surveiller les ressources Google Cloud ;
+- protéger les données grâce aux sauvegardes ;
+- automatiser le déploiement avec Terraform.
+
+## Architecture réseau
+
+Le projet utilise un VPC contenant plusieurs sous-réseaux.
+```mermaid
+flowchart TD
+
+    VPC["VPC privé"]
+
+    FRONT["Subnet Frontend"]
+    BASTION["Subnet Bastion"]
+
+    VM_FRONT["VM Frontend<br/>Nginx"]
+    VM_BASTION["VM Bastion<br/>SSH"]
+
+    SQL["Cloud SQL<br/>IP privée"]
+
+    VPC --> FRONT
+    VPC --> BASTION
+
+    FRONT --> VM_FRONT
+    BASTION --> VM_BASTION
+
+    VM_FRONT -->|"Connexion privée"| SQL
+    VM_BASTION -->|"Administration"| SQL
+
+    style VPC fill:#34A853,color:#fff
+    style FRONT fill:#4285F4,color:#fff
+    style BASTION fill:#FBBC04,color:#000
+    style VM_FRONT fill:#4285F4,color:#fff
+    style VM_BASTION fill:#FBBC04,color:#000
+    style SQL fill:#623CE4,color:#fff
 ```
 
-## Lancer en local
+### Subnets
 
-Avec Docker :
+| Subnet | CIDR | Utilisation |
+|---|---|---|
+| `subnet-frontend` | `10.1.0.0/16` | VM Frontend |
+| `subnet-bastion` | `10.2.0.0/24` | VM Bastion |
 
-```sh
-docker compose up --build
+Le subnet frontend est destiné aux ressources applicatives.
+
+Le subnet bastion est destiné aux ressources utilisées pour l'administration.
+
+## VM Frontend
+
+La VM frontend héberge actuellement un serveur **Nginx**.
+
+Elle est destinée à fournir :
+
+- le dashboard d'administration ;
+- l'interface client ;
+- l'interface médecin ;
+- le point d'entrée HTTP de l'application.
+
+La VM est connectée au subnet frontend.
+
+### Configuration
 ```
 
-Puis ouvrez http://localhost:8080. La base démarre avec cinq rendez-vous fictifs.
+frontend = { subnet = "frontend" network\_ip = ""
 
-Sans Docker ni base, pour voir l’interface seulement :
+tags = \[ "frontend", "internal-ssh" \]
 
-```sh
-cd api
-npm install
-npm run demo
+public\_ip = true
+
+startup = \<\<-EOF #!/bin/bash
+
+apt-get update apt-get install -y docker.io
+
+systemctl enable docker systemctl start docker
+
+docker pull nginx
+
+docker run -d  --name nginx  --restart unless-stopped  -p 80:80  nginx EOF }
+
 ```
 
-| Rôle | En local | Sur GCP |
-| --- | --- | --- |
-| Base de données | conteneur `base`, PostgreSQL sans port publié | Cloud SQL PostgreSQL sans IP publique |
-| Chemin vers la base | réseau interne de Docker | Sortie VPC de Cloud Run et Private Service Access |
-| Mot de passe | fichier monté depuis une config Compose | secret Secret Manager, monté comme fichier ou injecté en variable |
-| API et interface | conteneur `api` | Cloud Run, avec son identité dédiée |
+Le script de démarrage installe Docker puis lance un conteneur Nginx.
 
-Pour voir l’interface réagir à une panne, arrêtez la base avec `docker compose stop base` : l’agenda affiche le code d’erreur et la couche à vérifier. `docker compose start base` rétablit tout.
+## VM Bastion
 
-## Passer sur GCP
+La VM Bastion est utilisée pour l'administration de l'infrastructure.
 
-Le code d’`api/` se déploie tel quel. Le réseau, la base, le secret, les identités et le service Cloud Run, c’est vous qui les écrivez en Terraform.
+Elle permet notamment d'effectuer des connexions SSH vers :
 
-```sh
-REGION=europe-west9
-PROJECT_ID=votre-projet
-IMAGE="$REGION-docker.pkg.dev/$PROJECT_ID/medirdv/api:v1"
-gcloud builds submit --tag "$IMAGE" api
-gcloud artifacts docker images describe "$IMAGE" --format='value(image_summary.digest)'
+- la VM Frontend ;
+- les ressources nécessitant une administration interne.
 ```
 
-Le service attend ces variables sur Cloud Run :
+bastion = { subnet = "bastion" network\_ip = ""
 
-| Variable | Rôle |
-| --- | --- |
-| `INSTANCE_CONNECTION_NAME` | `projet:region:instance`. Active le connecteur Cloud SQL en IP privée. |
-| `DB_NAME`, `DB_USER` | Base et utilisateur applicatif, qui n’est pas un superutilisateur. |
-| `DB_PASSWORD_FILE` ou `DB_PASSWORD` | Le mot de passe, fourni par Secret Manager. Jamais dans le code ni dans Terraform en clair. |
-| `POOL_MAX` | Connexions maximales par instance, 5 par défaut. À multiplier par le nombre d’instances pour comparer à la limite de la base. |
-| `APP_VERSION` | Version affichée dans l’interface. |
-| `SEED_DEMO` | Mettre `false` pour ne pas créer les cinq rendez-vous de départ. |
+tags = \[ "bastion" \]
 
-Le connecteur appelle l’API Cloud SQL Admin : elle doit être activée, et l’identité du service a besoin de `roles/cloudsql.client`. Ce rôle ne crée pas de chemin réseau ; sans sortie VPC vers le réseau de la base, la connexion échoue avec une erreur réseau, et l’interface vous le dit.
+public\_ip = true
 
-Si le mot de passe est injecté en variable, il est lu au démarrage de l’instance : retirer l’accès au secret ne se voit qu’avec une nouvelle révision. Monté comme fichier, il est relu à chaque nouvelle connexion.
+startup = "" }
 
-## Routes
+```
 
-| Route | Rôle |
-| --- | --- |
-| `GET /` | Interface |
-| `GET /healthz` | Le processus tourne |
-| `GET /readyz` | La base répond (503 sinon, avec le code d’erreur) |
-| `GET /api/etat` | Mode, latence, pool, compteurs, dernière écriture |
-| `GET, POST /api/rendez-vous` | Lire et créer des rendez-vous fictifs |
-| `DELETE /api/rendez-vous/:id` | Supprimer, pour simuler l’erreur à rattraper |
-| `GET, POST /api/reperes` | Repères horodatés pour mesurer le RPO |
+### Sécurité SSH
 
-## La carte du déploiement
+Le Bastion dispose d'une IP publique afin de permettre une connexion administrative.
 
-En haut de l’interface, l’architecture cible est dessinée bloc par bloc. Chaque bloc s’allume selon ce que l’application constate elle-même, avec la preuve affichée dessous :
+Cependant, l'accès TCP/22 doit être limité par des règles firewall afin d'éviter d'autoriser SSH depuis Internet sans restriction.
 
-| Couleur | Sens |
-| --- | --- |
-| vert, « prouvé » | l’application l’a vérifié elle-même |
-| orange, « à revoir » | ça fonctionne, mais c’est un anti-pattern connu |
-| rouge, « en échec » | l’application a essayé et ça ne marche pas |
-| pointillés, « pas encore détecté » | rien de visible pour l’instant |
-| gris, « à prouver vous-même » | invisible depuis l’application : montrez-le dans la console |
-| violet, « simulé en local » | l’équivalent local, en attendant le déploiement |
+L'objectif est d'obtenir une architecture similaire à :
+```mermaid
+flowchart LR
 
-La carte constate, elle ne note pas : un bloc vert ne dit pas que votre choix est le bon, seulement qu’il est en place.
+    ADMIN["Administrateur"]
+    BASTION["VM Bastion"]
+    FRONT["VM Frontend"]
+    SQL["Cloud SQL"]
 
-Pour MediRdv, le service lit lui-même :
+    ADMIN -->|"SSH via IAP"| BASTION
+    BASTION -->|"SSH interne"| FRONT
+    BASTION -->|"Administration"| SQL
 
-| Bloc | Comment | Droit nécessaire |
-| --- | --- | --- |
-| Entrée du service | configuration Cloud Run : ingress et invocation publique ou non | `roles/run.viewer` sur le service, facultatif |
-| Identité | serveur de métadonnées | aucun |
-| Secret Manager | lecture du secret, si `DB_PASSWORD_SECRET` est utilisé | `roles/secretmanager.secretAccessor`, déjà nécessaire |
-| Réseau et base | résultat de la connexion, avec la couche en cause | aucun |
-| Exposition, sauvegardes, disponibilité | configuration de l’instance par l’API Cloud SQL Admin | couvert par `roles/cloudsql.client` |
+    style ADMIN fill:#623CE4,color:#fff
+    style BASTION fill:#FBBC04,color:#000
+    style FRONT fill:#4285F4,color:#fff
+    style SQL fill:#34A853,color:#fff
+```
 
-Avec `DB_PASSWORD_SECRET=projects/PROJET/secrets/NOM/versions/latest`, le service lit le mot de passe directement dans Secret Manager à chaque nouvelle connexion : retirez-lui le droit d’accès et le bloc passe au rouge dans les secondes qui suivent.
+## Cloud SQL PostgreSQL
 
-## Démo publique
+La base de données est hébergée sur **Cloud SQL PostgreSQL**.
 
-Avec `DEMO_PUBLIQUE=true`, le nom du patient est généré par le serveur et le nombre de lignes est plafonné à quarante. C’est le réglage des démos hébergées sur la VM du cours.
+Elle contient notamment les données liées :
+
+- aux rendez-vous ;
+- aux clients ;
+- aux utilisateurs ;
+- aux médecins ;
+- aux informations nécessaires à l'application.
+
+### Configuration
+
+| Configuration | Valeur |
+|---|---|
+| Moteur | PostgreSQL |
+| Version | PostgreSQL 15 |
+| Tier | `db-f1-micro` |
+| IP publique | Désactivée |
+| IP privée | Activée |
+| VPC | VPC du projet |
+| Backup | Activé |
+| PITR | À configurer |
+| Protection suppression | Désactivée actuellement |
+
+### Configuration Terraform
+```
+
+resource "google_sql_database_instance" "postgres_instance" { name = "cloudsql-postgres-instance" database_version = "POSTGRES_15" region = var.region
+
+settings { tier = "db-f1-micro"
+
+ip_configuration { ipv4_enabled = false private_network = "projects/${var.project_id}/global/networks/votre-vpc-name" }
+
+backup\_configuration { enabled = true } }
+
+deletion\_protection = false }
+
+```
+
+L'adresse IP publique est désactivée :
+```
+
+ipv4\_enabled = false
+
+```
+
+La base de données doit donc être accessible uniquement depuis les ressources autorisées du réseau privé.
+
+## Base de données
+
+La base PostgreSQL est créée avec Terraform :
+```
+
+resource "google_sql_database" "mydatabase" { name = "ma_base_de_donnees" instance = google_sql_database_instance.postgres\_instance.name }
+
+```
+
+## Utilisateur PostgreSQL
+
+Un utilisateur PostgreSQL est également créé :
+```
+
+resource "google_sql_user" "db_user" { name = "mon_utilisateur" instance = google_sql_database_instance.postgres_instance.name password = "mon_mot_de_passe_secret" }
+
+```
+
+> **Attention :** le mot de passe ne doit pas être écrit en clair dans le code Terraform. Il est recommandé d'utiliser `random_password` et `Google Secret Manager`.
+
+## Secret Manager
+
+Les informations sensibles doivent être stockées dans **Google Secret Manager**.
+
+L'objectif est d'éviter de stocker directement les mots de passe dans :
+
+- Git ;
+- `terraform.tfvars` ;
+- les fichiers Terraform ;
+- le code de l'application.
+
+L'architecture cible est :
+```mermaid
+flowchart LR
+
+    TF["Terraform"]
+    RP["Random Password"]
+    SM["Secret Manager"]
+    APP["Application"]
+
+    TF --> RP
+    RP --> SM
+    APP -->|"Lecture autorisée"| SM
+
+    style TF fill:#623CE4,color:#fff
+    style RP fill:#FBBC04,color:#000
+    style SM fill:#34A853,color:#fff
+    style APP fill:#4285F4,color:#fff
+```
+
+## Sauvegardes et récupération
+
+Cloud SQL utilise les sauvegardes automatiques afin de protéger les données.
+```
+
+backup\_configuration { enabled = true }
+
+```
+
+Le **Point-in-Time Recovery (PITR)** doit également être activé afin de permettre une récupération de la base à un instant précis.
+
+La configuration cible est :
+```
+
+backup_configuration { enabled = true point_in_time_recovery_enabled = true transaction_log_retention_days = 7 }
+
+```
+
+La conservation des journaux de transactions est prévue pour une durée de **7 jours**.
+
+## Observabilité
+
+L'infrastructure utilise les services Google Cloud suivants :
+
+- Cloud Logging ;
+- Cloud Monitoring.
+
+### Cloud Logging
+
+Cloud Logging permet de centraliser les logs provenant notamment :
+
+- de la VM Frontend ;
+- de la VM Bastion ;
+- de Cloud SQL ;
+- des autres services Google Cloud.
+```mermaid
+flowchart TD
+
+    FRONT["VM Frontend"]
+    BASTION["VM Bastion"]
+    SQL["Cloud SQL"]
+
+    LOG["Cloud Logging"]
+    MON["Cloud Monitoring"]
+
+    FRONT -->|"Logs"| LOG
+    BASTION -->|"Logs"| LOG
+    SQL -->|"Logs"| LOG
+
+    LOG -->|"Métriques / alertes"| MON
+
+    style FRONT fill:#4285F4,color:#fff
+    style BASTION fill:#FBBC04,color:#000
+    style SQL fill:#34A853,color:#fff
+    style LOG fill:#623CE4,color:#fff
+    style MON fill:#EA4335,color:#fff
+```
+
+### Cloud Monitoring
+
+Cloud Monitoring permet de suivre :
+
+- l'état des VM ;
+- les métriques Cloud SQL ;
+- les erreurs ;
+- l'utilisation des ressources ;
+- les problèmes potentiels de l'infrastructure.
+
+## Terraform
+
+L'infrastructure est entièrement déployée avec Terraform.
+
+Les principaux modules sont :
+```
+
+.
+├── main.tf 
+├── variables.tf 
+├── outputs.tf 
+│ 
+└── modules/ 
+    ├── network/ 
+    ├── vm/ 
+        ├── database/ 
+        ├── application/ 
+        └── observability/
+
+```
+
+### Module Network
+
+Le module `network` crée et configure :
+
+- le VPC ;
+- le subnet frontend ;
+- le subnet bastion ;
+- les paramètres réseau nécessaires à Cloud SQL.
+
+### Module VM
+
+Le module `vm` permet de créer :
+
+- la VM Frontend ;
+- la VM Bastion ;
+- les interfaces réseau ;
+- les disques ;
+- les clés SSH ;
+- les startup scripts.
+
+### Module Database
+
+Le module `database` permet de créer :
+
+- l'instance Cloud SQL ;
+- la base PostgreSQL ;
+- l'utilisateur PostgreSQL ;
+- le mot de passe ;
+- le secret associé.
+
+### Module Application
+
+Le module `application` permet de configurer l'application et ses connexions aux ressources nécessaires.
+
+### Module Observability
+
+Le module `observability` permet de configurer les éléments liés à :
+
+- Cloud Logging ;
+- Cloud Monitoring ;
+- la collecte des événements.
+
+## Exemple de module VM
+```
+
+module "vm" { for\_each = var.vms
+
+source = "./modules/vm"
+
+project_id = var.project_id
+
+name = each.key machine\_type = "e2-medium" zone = var.zone
+
+subnetwork = google_compute_subnetwork.subnets\[each.value.subnet\].id
+
+network_ip = each.value.network_ip instance_tags = each.value.tags public_ip = each.value.public\_ip
+
+ssh_public_key = var.ssh_public_key startup\_script = each.value.startup }
+
+```
+
+## Prérequis
+
+Avant de déployer l'infrastructure, il faut disposer de :
+
+- Terraform installé ;
+- un projet Google Cloud ;
+- les permissions IAM nécessaires ;
+- les APIs Google Cloud nécessaires ;
+- un compte disposant des droits suffisants pour créer les ressources.
+
+### APIs utilisées
+
+Les APIs principales sont :
+```
+
+compute.googleapis.com run.googleapis.com sqladmin.googleapis.com servicenetworking.googleapis.com secretmanager.googleapis.com logging.googleapis.com monitoring.googleapis.com
+
+```
+
+## Déploiement
+
+### Initialiser Terraform
+```
+
+terraform init
+
+```
+
+### Vérifier la configuration
+```
+
+terraform validate
+
+```
+
+### Générer le plan
+```
+
+terraform plan
+
+```
+
+### Déployer l'infrastructure
+```
+
+terraform apply
+
+```
+
+Pour appliquer automatiquement sans confirmation :
+```
+
+terraform apply -auto-approve
+
+```
+
+## Sécurité
+
+Les principales mesures de sécurité prévues sont :
+
+- VPC privé ;
+- séparation des subnets ;
+- Cloud SQL sans IP publique ;
+- accès à la base via réseau privé ;
+- Bastion dédié à l'administration ;
+- accès SSH limité par firewall ;
+- gestion des secrets avec Secret Manager ;
+- permissions IAM minimales ;
+- sauvegardes Cloud SQL ;
+- PITR ;
+- Logging ;
+- Monitoring.
+
+## Points à justifier
+
+Les choix d'architecture doivent être justifiés en fonction des besoins du projet.
+
+| Besoin | Hypothèse | Solution retenue |
+|---|---|---|
+| Frontend | Dashboard admin et interfaces client/médecin | VM Nginx |
+| Base de données | Rendez-vous, clients et utilisateurs | Cloud SQL PostgreSQL |
+| Réseau | Communication privée entre les ressources | VPC + subnets |
+| Administration | Connexion SSH aux ressources | VM Bastion |
+| Sécurité SSH | Éviter l'exposition directe des VM | Firewall + accès contrôlé |
+| Secrets | Protéger les mots de passe | Secret Manager |
+| Sauvegardes | Protection des données | Backup + PITR |
+| Observabilité | Suivi de l'infrastructure | Cloud Logging + Monitoring |
+
+## Architecture de sécurité
+```mermaid
+flowchart TB
+
+    ADMIN["Administrateur"]
+    CLIENT["Client / Médecin"]
+
+    BASTION["Bastion<br/>SSH contrôlé"]
+    FRONT["Frontend<br/>Nginx"]
+    VPC["VPC privé"]
+    SQL["Cloud SQL<br/>IP privée"]
+    SEC["Secret Manager"]
+    LOG["Cloud Logging"]
+    MON["Cloud Monitoring"]
+    BACKUP["Backup + PITR"]
+
+    ADMIN -->|"SSH via IAP"| BASTION
+    CLIENT -->|"HTTPS"| FRONT
+
+    BASTION --> VPC
+    FRONT --> VPC
+    VPC --> SQL
+
+    BASTION -->|"Administration"| FRONT
+    BASTION -->|"Administration"| SQL
+
+    FRONT -.->|"Secrets"| SEC
+
+    FRONT -.->|"Logs"| LOG
+    BASTION -.->|"Logs"| LOG
+    SQL -.->|"Logs"| LOG
+
+    LOG -->|"Métriques / alertes"| MON
+    SQL -->|"Sauvegardes"| BACKUP
+
+    style ADMIN fill:#623CE4,color:#fff
+    style CLIENT fill:#623CE4,color:#fff
+    style BASTION fill:#FBBC04,color:#000
+    style FRONT fill:#4285F4,color:#fff
+    style VPC fill:#34A853,color:#fff
+    style SQL fill:#4285F4,color:#fff
+    style SEC fill:#34A853,color:#fff
+    style LOG fill:#FBBC04,color:#000
+    style MON fill:#EA4335,color:#fff
+    style BACKUP fill:#EA4335,color:#fff
+```
+## Bonnes pratiques
+
+Pour un environnement de production, il est recommandé de :
+
+- désactiver les IP publiques lorsque cela est possible ;
+- limiter les règles firewall ;
+- limiter les sources autorisées sur le port TCP/22 ;
+- utiliser Secret Manager pour les secrets ;
+- ne jamais stocker les mots de passe dans Git ;
+- utiliser des comptes de service dédiés ;
+- appliquer le principe du moindre privilège IAM ;
+- activer `deletion_protection` sur Cloud SQL ;
+- conserver des sauvegardes ;
+- activer le PITR ;
+- surveiller les logs et les métriques ;
+- séparer les environnements de développement et de production.
+
+## Protection contre la suppression
+
+La configuration actuelle utilise :
+```
+
+deletion\_protection = false
+
+```
+
+Cela permet à Terraform de supprimer l'instance Cloud SQL.
+
+Pour la production, il est recommandé d'utiliser :
+```
+
+deletion\_protection = true
+
+```
+
+Cela réduit le risque de suppression accidentelle de la base de données.
+
+## Suppression de l'infrastructure
+
+Pour supprimer l'infrastructure :
+```
+
+terraform destroy
+
+```
+
+Terraform demandera une confirmation.
+
+Pour supprimer automatiquement :
+```
+
+terraform destroy -auto-approve
+
+```
+
+> **Attention :** la suppression de Cloud SQL peut entraîner une perte de données. Vérifiez toujours les sauvegardes avant toute suppression.
+
+## Résumé
+
+Le projet MediRDV met en place une infrastructure Google Cloud sécurisée et automatisée.
+
+L'architecture repose sur :
+
+- un VPC privé ;
+- un subnet frontend ;
+- un subnet bastion ;
+- une VM Frontend Nginx ;
+- une VM Bastion pour l'administration ;
+- Cloud SQL PostgreSQL avec IP privée ;
+- Secret Manager pour les secrets ;
+- Backup et PITR pour la protection des données ;
+- Cloud Logging pour les logs ;
+- Cloud Monitoring pour la supervision ;
+- Terraform pour automatiser le déploiement.
+
+L'objectif principal est de **réduire l'exposition publique, contrôler les accès et assurer la disponibilité et la traçabilité de l'infrastructure**.
