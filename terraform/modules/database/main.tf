@@ -20,7 +20,7 @@ resource "google_secret_manager_secret_version" "database_password" {
 resource "google_sql_database_instance" "postgres" {
   project          = var.project_id
   name             = "medirdv-postgres"
-  database_version = "POSTGRES_15"
+  database_version = "POSTGRES_18"
   region           = var.region
 
   settings {

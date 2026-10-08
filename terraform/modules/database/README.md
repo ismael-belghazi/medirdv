@@ -1,7 +1,7 @@
 
 # Module Database
 
-Ce module `database` Terraform permet de déployer une instance PostgreSQL 15 sur Google Cloud SQL, avec une connexion privée via un VPC, la gestion automatique du mot de passe via Google Secret Manager, ainsi que les sauvegardes et le Point-in-Time Recovery (PITR).
+Ce module `database` Terraform permet de déployer une instance PostgreSQL 18 sur Google Cloud SQL, avec une connexion privée via un VPC, la gestion automatique du mot de passe via Google Secret Manager, ainsi que les sauvegardes et le Point-in-Time Recovery (PITR).
 
 ## Architecture
 ```mermaid 
@@ -10,7 +10,7 @@ flowchart TD
 
     TF --> RP["Random Password<br/>32 caractères"]
     TF --> SM["Google Secret Manager"]
-    TF --> SQL["Cloud SQL<br/>PostgreSQL 15"]
+    TF --> SQL["Cloud SQL<br/>PostgreSQL 18"]
 
     RP --> SM
     RP --> USER["PostgreSQL User"]
@@ -52,7 +52,7 @@ flowchart TD
 Ce fichier contient l'ensemble des ressources nécessaires au déploiement de PostgreSQL.
 
 L'instance Cloud SQL est configurée avec :
-- PostgreSQL 15 ;
+- PostgreSQL 18 ;
 - le tier db-f1-micro ;
 - une adresse IP publique désactivée ;
 - une adresse IP privée ;
@@ -218,7 +218,7 @@ Configuration Cloud SQL
 | Configuration | Valeur |
 |---|---|
 | **Moteur** | PostgreSQL |
-| **Version** | PostgreSQL 15 |
+| **Version** | PostgreSQL 18 |
 | **Tier** | `db-f1-micro` |
 | **IP publique** | Désactivée |
 | **IP privée** | Activée |
@@ -244,7 +244,7 @@ Par exemple :
 ```mermaid
 flowchart LR
     APP["Application"] --> VPC["VPC privé"]
-    VPC --> SQL["Cloud SQL<br/>PostgreSQL 15"]
+    VPC --> SQL["Cloud SQL<br/>PostgreSQL 18"]
     SQL --> DB["Database"]
 ```
 ## Sauvegardes et récupération
@@ -316,7 +316,7 @@ Ce module Terraform permet de déployer une base PostgreSQL managée sur Google 
 flowchart TB
     subgraph GCP["Google Cloud"]
         subgraph VPC["VPC privé"]
-            SQL["Cloud SQL<br/>PostgreSQL 15"]
+            SQL["Cloud SQL<br/>PostgreSQL 18"]
             DB["Database"]
             USER["Application User"]
 
