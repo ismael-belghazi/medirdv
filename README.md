@@ -1,675 +1,479 @@
-
-# MediRDV — Infrastructure Google Cloud
+# MediRDV — Infrastructure as Code sur Google Cloud
 
 ## Présentation du projet
 
-Le projet **MediRDV** consiste à mettre en place une infrastructure sécurisée sur **Google Cloud Platform (GCP)** pour héberger une application de gestion de rendez-vous médicaux.
+**MediRDV** est un projet de gestion de rendez-vous médicaux dont l'application et l'infrastructure sont déployées sur Google Cloud Platform (GCP).
 
-L'architecture repose sur plusieurs services Google Cloud :
+Le projet utilise Docker pour empaqueter l'application et Terraform pour automatiser la création et la configuration des ressources cloud.
 
-- un **VPC privé** pour isoler les ressources ;
-- une **VM Frontend** exécutant Nginx ;
-- une **VM Bastion** dédiée aux connexions d'administration SSH ;
-- une instance **Cloud SQL PostgreSQL** accessible uniquement en IP privée ;
-- **Secret Manager** pour stocker les informations sensibles ;
-- **Cloud Logging** pour centraliser les logs ;
-- **Cloud Monitoring** pour superviser l'infrastructure ;
-- des **sauvegardes Cloud SQL** et le **Point-in-Time Recovery (PITR)**.
+L'infrastructure s'appuie notamment sur :
+
+- **Cloud Run** pour exécuter l'application conteneurisée ;
+- **Artifact Registry** pour stocker les images Docker ;
+- **Cloud SQL PostgreSQL** pour la base de données ;
+- **Secret Manager** pour gérer le mot de passe de la base de données ;
+- **Compute Engine** pour les machines virtuelles ;
+- **VPC** pour organiser les communications réseau ;
+- **Cloud Logging et Cloud Monitoring** pour la supervision ;
+- **GitHub Actions** pour automatiser les opérations d'intégration et de déploiement selon le workflow configuré.
 
 ## Architecture globale
+
 ```mermaid
 flowchart TB
-
-    CLIENT["Client / Médecin"]
+    USER["Utilisateur"]
     ADMIN["Administrateur"]
 
-    subgraph GCP["Google Cloud"]
-        subgraph VPC["VPC privé"]
-
-            subgraph FRONT_SUBNET["Subnet Frontend"]
-                FRONT["VM Frontend<br/>Nginx<br/>Application / Dashboard"]
-            end
-
-            subgraph BASTION_SUBNET["Subnet Bastion"]
-                BASTION["VM Bastion<br/>SSH"]
-            end
-
-        end
-
-        SQL["Cloud SQL<br/>PostgreSQL<br/>IP privée"]
-        SECRET["Secret Manager"]
-        BACKUP["Cloud SQL<br/>Backups + PITR"]
-        LOG["Cloud Logging"]
-        MON["Cloud Monitoring"]
+    subgraph REPO["Dépôt MediRDV"]
+        APP["Application Node.js"]
+        DOCKER["Dockerfile"]
+        TF["Terraform"]
+        CI["GitHub Actions"]
     end
 
-    CLIENT -->|"HTTPS : 443"| FRONT
-    ADMIN -->|"SSH via IAP : 22"| BASTION
-    BASTION -->|"SSH : 22"| FRONT
-    FRONT -->|"Connexion privée<br/>TCP : 5432"| SQL
-    BASTION -->|"Administration"| SQL
+    subgraph GCP["Google Cloud Platform"]
+        AR["Artifact Registry"]
 
-    SECRET -.->|"Secrets"| FRONT
-    SQL -->|"Sauvegardes"| BACKUP
+        subgraph NET["VPC"]
+            VMF["VM Frontend"]
+            VMB["VM Bastion"]
+        end
 
-    FRONT -.->|"Logs"| LOG
-    BASTION -.->|"Logs"| LOG
-    SQL -.->|"Logs"| LOG
-    LOG -->|"Métriques / alertes"| MON
+        CR["Cloud Run"]
+        SQL["Cloud SQL PostgreSQL"]
+        SM["Secret Manager"]
+        OBS["Cloud Logging / Monitoring"]
+    end
 
-    style CLIENT fill:#623CE4,color:#fff
-    style ADMIN fill:#623CE4,color:#fff
+    USER --> CR
+    ADMIN --> VMB
+    VMB --> VMF
 
-    style GCP fill:#f8f9fa,stroke:#5f6368,color:#202124
-    style VPC fill:#34A853,color:#fff
+    APP --> DOCKER
+    DOCKER --> AR
+    AR --> CR
 
-    style FRONT_SUBNET fill:#4285F4,color:#fff
-    style BASTION_SUBNET fill:#FBBC04,color:#000
+    TF --> NET
+    TF --> SQL
+    TF --> CR
+    TF --> SM
+    TF --> OBS
 
-    style FRONT fill:#1a73e8,color:#fff
-    style BASTION fill:#f9ab00,color:#000
+    CR --> SQL
+    CR -.-> SM
 
-    style SQL fill:#4285F4,color:#fff
-    style SECRET fill:#34A853,color:#fff
-    style BACKUP fill:#EA4335,color:#fff
-    style LOG fill:#FBBC04,color:#000
-    style MON fill:#34A853,color:#fff
-```
-## Objectifs
+    CR -.-> OBS
+    VMF -.-> OBS
+    VMB -.-> OBS
 
-Les principaux objectifs de l'infrastructure sont :
+    CI -.-> TF
 
-- isoler les ressources dans un réseau privé ;
-- limiter l'exposition des services sur Internet ;
-- sécuriser l'accès à la base de données ;
-- séparer les accès utilisateurs des accès d'administration ;
-- centraliser les logs ;
-- surveiller les ressources Google Cloud ;
-- protéger les données grâce aux sauvegardes ;
-- automatiser le déploiement avec Terraform.
-
-## Architecture réseau
-
-Le projet utilise un VPC contenant plusieurs sous-réseaux.
-```mermaid
-flowchart TD
-
-    VPC["VPC privé"]
-
-    FRONT["Subnet Frontend"]
-    BASTION["Subnet Bastion"]
-
-    VM_FRONT["VM Frontend<br/>Nginx"]
-    VM_BASTION["VM Bastion<br/>SSH"]
-
-    SQL["Cloud SQL<br/>IP privée"]
-
-    VPC --> FRONT
-    VPC --> BASTION
-
-    FRONT --> VM_FRONT
-    BASTION --> VM_BASTION
-
-    VM_FRONT -->|"Connexion privée"| SQL
-    VM_BASTION -->|"Administration"| SQL
-
-    style VPC fill:#34A853,color:#fff
-    style FRONT fill:#4285F4,color:#fff
-    style BASTION fill:#FBBC04,color:#000
-    style VM_FRONT fill:#4285F4,color:#fff
-    style VM_BASTION fill:#FBBC04,color:#000
-    style SQL fill:#623CE4,color:#fff
-```
-
-### Subnets
-
-| Subnet | CIDR | Utilisation |
-|---|---|---|
-| `subnet-frontend` | `10.1.0.0/16` | VM Frontend |
-| `subnet-bastion` | `10.2.0.0/24` | VM Bastion |
-
-Le subnet frontend est destiné aux ressources applicatives.
-
-Le subnet bastion est destiné aux ressources utilisées pour l'administration.
-
-## VM Frontend
-
-La VM frontend héberge actuellement un serveur **Nginx**.
-
-Elle est destinée à fournir :
-
-- le dashboard d'administration ;
-- l'interface client ;
-- l'interface médecin ;
-- le point d'entrée HTTP de l'application.
-
-La VM est connectée au subnet frontend.
-
-### Configuration
-```
-
-frontend = { subnet = "frontend" network\_ip = ""
-
-tags = \[ "frontend", "internal-ssh" \]
-
-public\_ip = true
-
-startup = \<\<-EOF #!/bin/bash
-
-apt-get update apt-get install -y docker.io
-
-systemctl enable docker systemctl start docker
-
-docker pull nginx
-
-docker run -d  --name nginx  --restart unless-stopped  -p 80:80  nginx EOF }
-
-```
-
-Le script de démarrage installe Docker puis lance un conteneur Nginx.
-
-## VM Bastion
-
-La VM Bastion est utilisée pour l'administration de l'infrastructure.
-
-Elle permet notamment d'effectuer des connexions SSH vers :
-
-- la VM Frontend ;
-- les ressources nécessitant une administration interne.
-```
-
-bastion = { subnet = "bastion" network\_ip = ""
-
-tags = \[ "bastion" \]
-
-public\_ip = true
-
-startup = "" }
-
-```
-
-### Sécurité SSH
-
-Le Bastion dispose d'une IP publique afin de permettre une connexion administrative.
-
-Cependant, l'accès TCP/22 doit être limité par des règles firewall afin d'éviter d'autoriser SSH depuis Internet sans restriction.
-
-L'objectif est d'obtenir une architecture similaire à :
-```mermaid
-flowchart LR
-
-    ADMIN["Administrateur"]
-    BASTION["VM Bastion"]
-    FRONT["VM Frontend"]
-    SQL["Cloud SQL"]
-
-    ADMIN -->|"SSH via IAP"| BASTION
-    BASTION -->|"SSH interne"| FRONT
-    BASTION -->|"Administration"| SQL
-
-    style ADMIN fill:#623CE4,color:#fff
-    style BASTION fill:#FBBC04,color:#000
-    style FRONT fill:#4285F4,color:#fff
+    style REPO fill:#f3e8ff,stroke:#623CE4,color:#202124
+    style GCP fill:#f8f9fa,stroke:#4285F4,color:#202124
+    style NET fill:#e8f5e9,stroke:#34A853,color:#202124
+    style CR fill:#4285F4,color:#fff
     style SQL fill:#34A853,color:#fff
-```
-
-## Cloud SQL PostgreSQL
-
-La base de données est hébergée sur **Cloud SQL PostgreSQL**.
-
-Elle contient notamment les données liées :
-
-- aux rendez-vous ;
-- aux clients ;
-- aux utilisateurs ;
-- aux médecins ;
-- aux informations nécessaires à l'application.
-
-### Configuration
-
-| Configuration | Valeur |
-|---|---|
-| Moteur | PostgreSQL |
-| Version | PostgreSQL 15 |
-| Tier | `db-f1-micro` |
-| IP publique | Désactivée |
-| IP privée | Activée |
-| VPC | VPC du projet |
-| Backup | Activé |
-| PITR | À configurer |
-| Protection suppression | Désactivée actuellement |
-
-### Configuration Terraform
-```
-
-resource "google_sql_database_instance" "postgres_instance" { name = "cloudsql-postgres-instance" database_version = "POSTGRES_15" region = var.region
-
-settings { tier = "db-f1-micro"
-
-ip_configuration { ipv4_enabled = false private_network = "projects/${var.project_id}/global/networks/votre-vpc-name" }
-
-backup\_configuration { enabled = true } }
-
-deletion\_protection = false }
-
-```
-
-L'adresse IP publique est désactivée :
-```
-
-ipv4\_enabled = false
-
-```
-
-La base de données doit donc être accessible uniquement depuis les ressources autorisées du réseau privé.
-
-## Base de données
-
-La base PostgreSQL est créée avec Terraform :
-```
-
-resource "google_sql_database" "mydatabase" { name = "ma_base_de_donnees" instance = google_sql_database_instance.postgres\_instance.name }
-
-```
-
-## Utilisateur PostgreSQL
-
-Un utilisateur PostgreSQL est également créé :
-```
-
-resource "google_sql_user" "db_user" { name = "mon_utilisateur" instance = google_sql_database_instance.postgres_instance.name password = "mon_mot_de_passe_secret" }
-
-```
-
-> **Attention :** le mot de passe ne doit pas être écrit en clair dans le code Terraform. Il est recommandé d'utiliser `random_password` et `Google Secret Manager`.
-
-## Secret Manager
-
-Les informations sensibles doivent être stockées dans **Google Secret Manager**.
-
-L'objectif est d'éviter de stocker directement les mots de passe dans :
-
-- Git ;
-- `terraform.tfvars` ;
-- les fichiers Terraform ;
-- le code de l'application.
-
-L'architecture cible est :
-```mermaid
-flowchart LR
-
-    TF["Terraform"]
-    RP["Random Password"]
-    SM["Secret Manager"]
-    APP["Application"]
-
-    TF --> RP
-    RP --> SM
-    APP -->|"Lecture autorisée"| SM
-
-    style TF fill:#623CE4,color:#fff
-    style RP fill:#FBBC04,color:#000
+    style AR fill:#FBBC04,color:#000
     style SM fill:#34A853,color:#fff
-    style APP fill:#4285F4,color:#fff
+    style OBS fill:#EA4335,color:#fff
 ```
 
-## Sauvegardes et récupération
+_Schéma conceptuel de l'architecture. Les flux effectifs dépendent de la configuration de chaque ressource._
 
-Cloud SQL utilise les sauvegardes automatiques afin de protéger les données.
-```
+## Structure du dépôt
 
-backup\_configuration { enabled = true }
-
-```
-
-Le **Point-in-Time Recovery (PITR)** doit également être activé afin de permettre une récupération de la base à un instant précis.
-
-La configuration cible est :
-```
-
-backup_configuration { enabled = true point_in_time_recovery_enabled = true transaction_log_retention_days = 7 }
+L'organisation du projet est la suivante :
 
 ```
-
-La conservation des journaux de transactions est prévue pour une durée de **7 jours**.
-
-## Observabilité
-
-L'infrastructure utilise les services Google Cloud suivants :
-
-- Cloud Logging ;
-- Cloud Monitoring.
-
-### Cloud Logging
-
-Cloud Logging permet de centraliser les logs provenant notamment :
-
-- de la VM Frontend ;
-- de la VM Bastion ;
-- de Cloud SQL ;
-- des autres services Google Cloud.
-```mermaid
-flowchart TD
-
-    FRONT["VM Frontend"]
-    BASTION["VM Bastion"]
-    SQL["Cloud SQL"]
-
-    LOG["Cloud Logging"]
-    MON["Cloud Monitoring"]
-
-    FRONT -->|"Logs"| LOG
-    BASTION -->|"Logs"| LOG
-    SQL -->|"Logs"| LOG
-
-    LOG -->|"Métriques / alertes"| MON
-
-    style FRONT fill:#4285F4,color:#fff
-    style BASTION fill:#FBBC04,color:#000
-    style SQL fill:#34A853,color:#fff
-    style LOG fill:#623CE4,color:#fff
-    style MON fill:#EA4335,color:#fff
+medirdv/
+├── .gitignore
+├── docker-compose.yml
+├── README.md
+│
+├── .github/
+│   └── workflows/
+│       └── terraform.yml
+│
+├── app/
+│   ├── Dockerfile
+│   ├── package.json
+│   ├── package-lock.json
+│   ├── server.mjs
+│   ├── deploiement.mjs
+│   ├── gcp.mjs
+│   ├── stockage.mjs
+│   ├── README.md
+│   └── public/
+│       ├── app.js
+│       ├── carte.js
+│       ├── index.html
+│       └── kit.css
+│
+└── terraform/
+    ├── main.tf
+    ├── providers.tf
+    ├── variables.tf
+    ├── outputs.tf
+    ├── terraform.tfvars.exemple
+    ├── README.md
+    │
+    ├── bootstrap/
+    │   ├── main.tf
+    │   └── README.md
+    │
+    └── modules/
+        ├── application/
+        │   ├── main.tf
+        │   ├── variables.tf
+        │   ├── outputs.tf
+        │   └── README.md
+        │
+        ├── database/
+        │   ├── main.tf
+        │   ├── variables.tf
+        │   ├── outputs.tf
+        │   └── README.md
+        │
+        ├── network/
+        │   ├── main.tf
+        │   ├── variables.tf
+        │   ├── outputs.tf
+        │   └── README.md
+        │
+        ├── observability/
+        │   ├── main.tf
+        │   ├── dashboard.tf
+        │   ├── variables.tf
+        │   ├── outputs.tf
+        │   └── README.md
+        │
+        └── vm/
+            ├── main.tf
+            ├── variables.tf
+            ├── outputs.tf
+            └── README.md
 ```
 
-### Cloud Monitoring
+Les fichiers générés par Terraform, notamment le dossier `.terraform/` et les fichiers d'état, ne sont pas présentés ici, car ils ne constituent pas le code source à documenter ou à versionner.
 
-Cloud Monitoring permet de suivre :
+## Organisation du projet
 
-- l'état des VM ;
-- les métriques Cloud SQL ;
-- les erreurs ;
-- l'utilisation des ressources ;
-- les problèmes potentiels de l'infrastructure.
+### Application — `app/`
 
-## Terraform
+Le dossier `app/` contient le code de l'application MediRDV.
 
-L'infrastructure est entièrement déployée avec Terraform.
+| Fichier | Rôle |
+| --- | --- |
+| `server.mjs` | Point d'entrée du serveur Node.js |
+| `deploiement.mjs` | Code lié au déploiement de l'application |
+| `gcp.mjs` | Intégration avec Google Cloud |
+| `stockage.mjs` | Gestion du stockage applicatif |
+| `Dockerfile` | Instructions de construction de l'image Docker |
+| `docker-compose.yml` | Configuration de l'environnement Docker local, à la racine |
+| `public/` | Fichiers frontend : HTML, JavaScript et CSS |
 
-Les principaux modules sont :
-```
+Pour connaître les détails de l'application et son fonctionnement, consultez le README de l'application.
 
-.
-├── main.tf 
-├── variables.tf 
-├── outputs.tf 
-│ 
-└── modules/ 
-    ├── network/ 
-    ├── vm/ 
-        ├── database/ 
-        ├── application/ 
-        └── observability/
+### Infrastructure — `terraform/`
 
-```
+Le dossier `terraform/` contient le code Infrastructure as Code.
+
+Il comprend :
+
+- `main.tf` : orchestration des modules ;
+- `providers.tf` : configuration des versions Terraform, des providers et du backend ;
+- `variables.tf` : paramètres de l'infrastructure ;
+- `outputs.tf` : informations exposées après le déploiement ;
+- `terraform.tfvars.exemple` : exemple de configuration des variables ;
+- `bootstrap/` : configuration initiale du stockage distant de l'état Terraform ;
+- `modules/` : modules réutilisables de l'infrastructure.
+
+## Modules Terraform
+
+Chaque module possède son propre README détaillant ses ressources, ses variables, ses outputs et son utilisation.
+
+| Module | Rôle | Documentation |
+| --- | --- | --- |
+| `network` | VPC, subnets, Private Service Access et règles firewall | README Network |
+| `vm` | Machines virtuelles Compute Engine, disques et interfaces réseau | README VM |
+| `database` | Cloud SQL PostgreSQL, utilisateur, mot de passe et Secret Manager | README Database |
+| `application` | Déploiement de l'application sur Cloud Run et configuration de ses connexions | README Application |
+| `observability` | Dashboard Cloud Monitoring et politiques d'alerte | README Observability |
 
 ### Module Network
 
-Le module `network` crée et configure :
+Le module `network` crée le réseau utilisé par les ressources de l'infrastructure.
 
-- le VPC ;
-- le subnet frontend ;
-- le subnet bastion ;
-- les paramètres réseau nécessaires à Cloud SQL.
+Il configure le VPC, les subnets frontend et bastion, la plage d'adresses réservée à Private Service Access et les règles firewall nécessaires.
+
+Documentation : [`terraform/modules/network/README.md`](./terraform/modules/network/README.md)
 
 ### Module VM
 
-Le module `vm` permet de créer :
+Le module `vm` crée des machines virtuelles Compute Engine à partir de la variable `vms`.
 
-- la VM Frontend ;
-- la VM Bastion ;
-- les interfaces réseau ;
-- les disques ;
-- les clés SSH ;
-- les startup scripts.
+Il permet de configurer le type de machine, la zone, le subnet, les adresses IP, les tags réseau, les clés SSH et les scripts de démarrage.
+
+Documentation : [`terraform/modules/vm/README.md`](./terraform/modules/vm/README.md) 
 
 ### Module Database
 
-Le module `database` permet de créer :
+Le module `database` déploie une instance Cloud SQL PostgreSQL avec une adresse IP privée.
 
-- l'instance Cloud SQL ;
-- la base PostgreSQL ;
-- l'utilisateur PostgreSQL ;
-- le mot de passe ;
-- le secret associé.
+Il crée la base, l'utilisateur PostgreSQL et un mot de passe généré automatiquement, stocké dans Secret Manager. Il configure également les sauvegardes et la récupération à un instant précis selon les paramètres du module.
+
+Documentation : [`terraform/modules/database/README.md`](./terraform/modules/database/README.md) 
 
 ### Module Application
 
-Le module `application` permet de configurer l'application et ses connexions aux ressources nécessaires.
+Le module `application` configure le service Cloud Run et les paramètres nécessaires à sa connexion à la base de données.
+
+Il reçoit notamment les informations de connexion Cloud SQL, le nom de la base, l'utilisateur et la référence du secret contenant le mot de passe.
+
+Documentation : [`terraform/modules/application/README.md`](./terraform/modules/application/README.md) 
 
 ### Module Observability
 
-Le module `observability` permet de configurer les éléments liés à :
+Le module `observability` configure les outils de supervision de l'infrastructure.
 
-- Cloud Logging ;
-- Cloud Monitoring ;
-- la collecte des événements.
+Il comprend un dashboard Cloud Monitoring présentant des métriques de Cloud Run et Cloud SQL, ainsi que des politiques d'alerte pour les erreurs HTTP 5xx et une utilisation CPU élevée de Cloud SQL.
 
-## Exemple de module VM
-```
+Documentation : [`terraform/modules/observability/README.md`](./terraform/modules/observability/README.md) 
 
-module "vm" { for\_each = var.vms
+## Bootstrap Terraform
 
-source = "./modules/vm"
+Le dossier `terraform/bootstrap/` contient la configuration initiale nécessaire à la préparation du stockage distant de l'état Terraform.
 
-project_id = var.project_id
+Le backend principal utilise un bucket Google Cloud Storage pour conserver l'état de l'infrastructure.
 
-name = each.key machine\_type = "e2-medium" zone = var.zone
+Le bucket doit être créé et accessible avant l'initialisation du projet principal avec ce backend.
 
-subnetwork = google_compute_subnetwork.subnets\[each.value.subnet\].id
-
-network_ip = each.value.network_ip instance_tags = each.value.tags public_ip = each.value.public\_ip
-
-ssh_public_key = var.ssh_public_key startup\_script = each.value.startup }
-
-```
+Pour les détails de la procédure, consultez le README du bootstrap.
 
 ## Prérequis
 
-Avant de déployer l'infrastructure, il faut disposer de :
+Avant de déployer l'infrastructure, vous devez disposer de :
 
-- Terraform installé ;
 - un projet Google Cloud ;
-- les permissions IAM nécessaires ;
-- les APIs Google Cloud nécessaires ;
-- un compte disposant des droits suffisants pour créer les ressources.
+- Terraform version `1.6.0` ou supérieure ;
+- Google Cloud CLI (`gcloud`) ;
+- Docker pour construire et tester localement l'application ;
+- les permissions IAM nécessaires à la création des ressources ;
+- un bucket GCS pour le stockage de l'état Terraform ;
+- les APIs Google Cloud requises.
 
-### APIs utilisées
+Les APIs activées par le code Terraform principal comprennent :
 
-Les APIs principales sont :
+- Compute Engine API ;
+- Cloud Run API ;
+- Cloud SQL Admin API ;
+- Service Networking API ;
+- Secret Manager API ;
+- Cloud Logging API ;
+- Cloud Monitoring API ;
+- Artifact Registry API.
+
+Le compte utilisé pour le déploiement doit disposer des autorisations nécessaires pour activer les APIs et créer les ressources correspondantes.
+
+## Configuration Terraform
+
+### 1\. Se placer dans le dossier Terraform
+
+Depuis la racine du dépôt :
+
+```bash
+cd terraform
 ```
 
-compute.googleapis.com run.googleapis.com sqladmin.googleapis.com servicenetworking.googleapis.com secretmanager.googleapis.com logging.googleapis.com monitoring.googleapis.com
+### 2\. Préparer le fichier de variables
+
+Copiez le fichier d'exemple :
 
 ```
-
-## Déploiement
-
-### Initialiser Terraform
+Copy-Item terraform.tfvars.exemple terraform.tfvars
 ```
 
+Adaptez ensuite les valeurs à votre projet Google Cloud.
+
+Les principales variables comprennent :
+
+| Variable | Description |
+| --- | --- |
+| `project_id` | Identifiant du projet Google Cloud |
+| `region` | Région des ressources |
+| `zone` | Zone des machines virtuelles |
+| `network_name` | Nom du VPC |
+| `subnet_frontend_name` | Nom du subnet frontend |
+| `subnet_frontend_cidr` | Plage IP du subnet frontend |
+| `subnet_bastion_name` | Nom du subnet bastion |
+| `subnet_bastion_cidr` | Plage IP du subnet bastion |
+| `database_name` | Nom de la base PostgreSQL |
+| `database_user` | Utilisateur PostgreSQL |
+| `cloud_run_name` | Nom du service Cloud Run |
+| `container_image` | Image Docker utilisée par Cloud Run |
+| `ssh_public_keys` | Liste des clés SSH publiques |
+| `vms` | Configuration des machines virtuelles à créer |
+
+La variable `vms` contient une map d'objets. Chaque entrée définit le subnet, l'adresse IP privée, les tags réseau, l'utilisation d'une IP publique et le script de démarrage de la VM.
+
+La liste exacte des variables et leurs valeurs par défaut sont définies dans `terraform/variables.tf`.
+
+> **Sécurité :** ne versionnez pas `terraform.tfvars` si ce fichier contient des informations sensibles ou des paramètres propres à votre environnement. Le mot de passe PostgreSQL est géré par le module Database et ne doit pas être écrit en clair dans ce fichier.
+
+## Déploiement de l'infrastructure
+
+### 1\. Authentification Google Cloud
+
+Connectez-vous avec Google Cloud CLI :
+
+```bash
+gcloud auth login
+gcloud config set project VOTRE_PROJECT_ID
+```
+
+Pour les déploiements automatisés, privilégiez une identité dédiée et des permissions IAM minimales.
+
+### 2\. Initialiser Terraform
+
+Depuis le dossier `terraform/` :
+
+```bash
 terraform init
-
 ```
 
-### Vérifier la configuration
-```
+Cette commande télécharge les providers et initialise le backend configuré.
 
+### 3\. Formater et valider le code
+
+```bash
+terraform fmt -recursive
 terraform validate
-
 ```
 
-### Générer le plan
-```
+### 4\. Prévisualiser les changements
 
+```bash
 terraform plan
-
 ```
 
-### Déployer l'infrastructure
-```
+Vérifiez les ressources qui seront créées, modifiées ou supprimées avant de poursuivre.
 
+### 5\. Déployer l'infrastructure
+
+```bash
 terraform apply
-
 ```
 
-Pour appliquer automatiquement sans confirmation :
+Terraform demande une confirmation avant d'appliquer les changements.
+
+Il est préférable de conserver cette confirmation lors d'un déploiement manuel.
+
+## Outputs Terraform
+
+Une fois le déploiement terminé, les informations exposées peuvent être consultées avec :
+
+```bash
+terraform output
 ```
 
-terraform apply -auto-approve
+Les outputs principaux définis dans `terraform/outputs.tf` sont :
 
+| Output | Description |
+| --- | --- |
+| `cloud_run_url` | URL du service Cloud Run |
+| `cloud_run_service_account` | Compte de service utilisé par Cloud Run |
+| `vpc_id` | Identifiant du VPC |
+| `subnet_frontend_id` | Identifiant du subnet frontend |
+| `subnet_bastion_id` | Identifiant du subnet bastion |
+| `cloud_sql_private_ip` | Adresse IP privée de Cloud SQL |
+| `cloud_sql_instance` | Nom de l'instance Cloud SQL |
+
+Pour consulter un output particulier :
+
+```bash
+terraform output cloud_run_url
+terraform output cloud_sql_private_ip
+terraform output cloud_sql_instance
 ```
+
+## Application Docker
+
+L'application dispose de son propre `Dockerfile` dans le dossier `app/`.
+
+Pour construire l'image depuis la racine du dépôt :
+
+```bash
+docker build -t medirdv:local ./app
+```
+
+Pour lancer l'environnement local, consultez le `docker-compose.yml` situé à la racine et le README de l'application.
+
+Le déploiement Cloud Run utilise la valeur de `container_image`. L'image doit être disponible dans un registre accessible par le service, notamment Artifact Registry si ce registre est utilisé pour le déploiement.
+
+La création du dépôt Artifact Registry par Terraform ne construit pas automatiquement l'image Docker : la construction et la publication doivent être réalisées par une commande ou un pipeline adapté.
+
+## Intégration continue et déploiement
+
+Le dépôt contient un workflow GitHub Actions :
+
+` .github/workflows/terraform.yml`
+
+Ce workflow est destiné à automatiser les opérations Terraform définies dans sa configuration.
+
+Les étapes effectivement exécutées, les événements déclencheurs, les contrôles et la méthode d'authentification dépendent du contenu de `terraform.yml`.
+
+Pour les déploiements automatisés, utilisez de préférence Workload Identity Federation ou une méthode d'authentification sécurisée, sans clé de service persistante dans le dépôt.
 
 ## Sécurité
 
-Les principales mesures de sécurité prévues sont :
+Les principales mesures de sécurité de l'infrastructure comprennent :
 
-- VPC privé ;
-- séparation des subnets ;
-- Cloud SQL sans IP publique ;
-- accès à la base via réseau privé ;
-- Bastion dédié à l'administration ;
-- accès SSH limité par firewall ;
-- gestion des secrets avec Secret Manager ;
-- permissions IAM minimales ;
-- sauvegardes Cloud SQL ;
-- PITR ;
-- Logging ;
-- Monitoring.
-
-## Points à justifier
-
-Les choix d'architecture doivent être justifiés en fonction des besoins du projet.
-
-| Besoin | Hypothèse | Solution retenue |
-|---|---|---|
-| Frontend | Dashboard admin et interfaces client/médecin | VM Nginx |
-| Base de données | Rendez-vous, clients et utilisateurs | Cloud SQL PostgreSQL |
-| Réseau | Communication privée entre les ressources | VPC + subnets |
-| Administration | Connexion SSH aux ressources | VM Bastion |
-| Sécurité SSH | Éviter l'exposition directe des VM | Firewall + accès contrôlé |
-| Secrets | Protéger les mots de passe | Secret Manager |
-| Sauvegardes | Protection des données | Backup + PITR |
-| Observabilité | Suivi de l'infrastructure | Cloud Logging + Monitoring |
-
-## Architecture de sécurité
-```mermaid
-flowchart TB
-
-    ADMIN["Administrateur"]
-    CLIENT["Client / Médecin"]
-
-    BASTION["Bastion<br/>SSH contrôlé"]
-    FRONT["Frontend<br/>Nginx"]
-    VPC["VPC privé"]
-    SQL["Cloud SQL<br/>IP privée"]
-    SEC["Secret Manager"]
-    LOG["Cloud Logging"]
-    MON["Cloud Monitoring"]
-    BACKUP["Backup + PITR"]
-
-    ADMIN -->|"SSH via IAP"| BASTION
-    CLIENT -->|"HTTPS"| FRONT
-
-    BASTION --> VPC
-    FRONT --> VPC
-    VPC --> SQL
-
-    BASTION -->|"Administration"| FRONT
-    BASTION -->|"Administration"| SQL
-
-    FRONT -.->|"Secrets"| SEC
-
-    FRONT -.->|"Logs"| LOG
-    BASTION -.->|"Logs"| LOG
-    SQL -.->|"Logs"| LOG
-
-    LOG -->|"Métriques / alertes"| MON
-    SQL -->|"Sauvegardes"| BACKUP
-
-    style ADMIN fill:#623CE4,color:#fff
-    style CLIENT fill:#623CE4,color:#fff
-    style BASTION fill:#FBBC04,color:#000
-    style FRONT fill:#4285F4,color:#fff
-    style VPC fill:#34A853,color:#fff
-    style SQL fill:#4285F4,color:#fff
-    style SEC fill:#34A853,color:#fff
-    style LOG fill:#FBBC04,color:#000
-    style MON fill:#EA4335,color:#fff
-    style BACKUP fill:#EA4335,color:#fff
-```
-## Bonnes pratiques
+- un VPC personnalisé et des subnets séparés ;
+- des règles firewall ciblées ;
+- une adresse IP privée pour Cloud SQL ;
+- la gestion du mot de passe de la base via Secret Manager ;
+- des clés SSH configurables pour les VM ;
+- la supervision via Cloud Monitoring ;
+- le stockage distant de l'état Terraform ;
+- la séparation du code applicatif et du code d'infrastructure.
 
 Pour un environnement de production, il est recommandé de :
 
-- désactiver les IP publiques lorsque cela est possible ;
-- limiter les règles firewall ;
-- limiter les sources autorisées sur le port TCP/22 ;
-- utiliser Secret Manager pour les secrets ;
-- ne jamais stocker les mots de passe dans Git ;
-- utiliser des comptes de service dédiés ;
-- appliquer le principe du moindre privilège IAM ;
-- activer `deletion_protection` sur Cloud SQL ;
-- conserver des sauvegardes ;
-- activer le PITR ;
-- surveiller les logs et les métriques ;
-- séparer les environnements de développement et de production.
+- limiter les permissions IAM au strict nécessaire ;
+- éviter les adresses IP publiques lorsqu'elles ne sont pas indispensables ;
+- limiter les sources autorisées pour SSH ;
+- activer la protection contre la suppression de Cloud SQL ;
+- protéger le bucket d'état Terraform et limiter son accès ;
+- ne jamais versionner les fichiers d'état ou les secrets ;
+- configurer les alertes et vérifier les sauvegardes ;
+- protéger les branches et les secrets GitHub Actions.
 
-## Protection contre la suppression
+## Nettoyage de l'infrastructure
 
-La configuration actuelle utilise :
-```
+Pour supprimer les ressources gérées par Terraform :
 
-deletion\_protection = false
-
-```
-
-Cela permet à Terraform de supprimer l'instance Cloud SQL.
-
-Pour la production, il est recommandé d'utiliser :
-```
-
-deletion\_protection = true
-
-```
-
-Cela réduit le risque de suppression accidentelle de la base de données.
-
-## Suppression de l'infrastructure
-
-Pour supprimer l'infrastructure :
-```
-
+```bash
 terraform destroy
-
 ```
 
-Terraform demandera une confirmation.
+Vérifiez attentivement le plan de suppression avant de confirmer.
 
-Pour supprimer automatiquement :
-```
+> **Attention :** la suppression de Cloud SQL ou d'autres ressources persistantes peut entraîner une perte de données. Vérifiez les sauvegardes et les besoins de conservation avant toute suppression.
 
-terraform destroy -auto-approve
+## Documentation complémentaire
 
-```
+- README de l'application
+- README du bootstrap Terraform
+- README du module Network
+- README du module VM
+- README du module Database
+- README du module Application
+- README du module Observability
 
-> **Attention :** la suppression de Cloud SQL peut entraîner une perte de données. Vérifiez toujours les sauvegardes avant toute suppression.
+## Conclusion
 
-## Résumé
+MediRDV combine une application conteneurisée, une infrastructure Google Cloud déclarative et des modules Terraform réutilisables.
 
-Le projet MediRDV met en place une infrastructure Google Cloud sécurisée et automatisée.
+Cette organisation sépare le code applicatif de l'infrastructure, facilite la maintenance et permet de déployer les ressources de manière reproductible.
 
-L'architecture repose sur :
-
-- un VPC privé ;
-- un subnet frontend ;
-- un subnet bastion ;
-- une VM Frontend Nginx ;
-- une VM Bastion pour l'administration ;
-- Cloud SQL PostgreSQL avec IP privée ;
-- Secret Manager pour les secrets ;
-- Backup et PITR pour la protection des données ;
-- Cloud Logging pour les logs ;
-- Cloud Monitoring pour la supervision ;
-- Terraform pour automatiser le déploiement.
-
-L'objectif principal est de **réduire l'exposition publique, contrôler les accès et assurer la disponibilité et la traçabilité de l'infrastructure**.
+Terraform orchestre les composants réseau, les machines virtuelles, la base de données, l'application Cloud Run et la supervision, tandis que Docker et GitHub Actions participent au processus de construction et de déploiement selon leur configuration respective.
