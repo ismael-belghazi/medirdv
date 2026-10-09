@@ -47,3 +47,8 @@ variable "database_secret" {
   description = "Nom du secret contenant le mot de passe PostgreSQL"
   type        = string
 }
+
+variable "instance_connection_name" {
+  description = "Nom de connexion de l'instance Cloud SQL"
+  type        = string
+}

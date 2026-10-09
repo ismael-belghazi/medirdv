@@ -1,19 +1,3 @@
-resource "google_logging_project_sink" "medirdv" {
-  project = var.project_id
-  name    = "medirdv-logs"
-
-  destination = "logging.googleapis.com/projects/${var.project_id}"
-
-  filter = <<-EOT
-    resource.type="cloud_run_revision"
-    OR resource.type="cloudsql_database"
-  EOT
-
-  # Le sink utilise une identité propre.
-  unique_writer_identity = true
-}
-
-
 resource "google_monitoring_alert_policy" "cloud_run_errors" {
   project      = var.project_id
   display_name = "MediRDV - Cloud Run errors"
